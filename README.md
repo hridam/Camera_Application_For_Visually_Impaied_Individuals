@@ -1,0 +1,2 @@
+# Camera_Application_For_Visually_Impaied_Individuals
+A small mini project

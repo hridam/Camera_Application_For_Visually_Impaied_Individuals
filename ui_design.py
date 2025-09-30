@@ -42,28 +42,71 @@ def main():
         lables[name] = lbl
 
     cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("couldn't open the webcam")
+        return
+    
+    # for the face detection
+    face_classification = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
     def update_frame():
         ret, frame = cap.read()
-        if ret:
-            frame = cv2.resize(frame, (320, 240))
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame_rgb)
-            imgtk = ImageTk.PhotoImage(image=img)
+        if not ret:
+            root.after(30, update_frame)
+            return
+        
+        # mirror effect
+        frame = cv2.flip(frame, 1)
 
-            for lbl in lables.values():
-                lbl.imgtk = imgtk
-                lbl.configure(image=imgtk)
+        # face detection 
+        gray =cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_classification.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=10, 
+            minSize=(30, 30)
+        )
+
+        # drawing the bounding boxes 
+        for(x, y, w, h) in faces:
+            cv2.rectangle(frame, (x,y), (x + w, y + h), (255, 0 , 0), 3) 
+
+        # resize for the display 
+        frame_resize = cv2.resize(frame, (320, 240))
+        frame_rgb = cv2.cvtColor(frame_resize, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame_rgb)
+        imgtk = ImageTk.PhotoImage(image=img)
+
+
+        # processing in all the 5 region 
+
+        for lbl in lables.values():
+            lbl.imgtk = imgtk
+            lbl.configure(image=imgtk)
 
         root.after(30, update_frame)
     
-    update_frame()
+            
+        # if ret:
+        #     frame = cv2.resize(frame, (320, 240))
+        #     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        #     img = Image.fromarray(frame_rgb)
+        #     imgtk = ImageTk.PhotoImage(image=img)
+
+        #     for lbl in lables.values():
+        #         lbl.imgtk = imgtk
+        #         lbl.configure(image=imgtk)
+
+        # root.after(30, update_frame)
+    
+    # update_frame()
 
     def on_close():
         cap.release()
         root.destroy()
     
     root.protocol("WM_DELETE_WINDOW", on_close)
+    update_frame()
     root.mainloop()
     
     # main_frame.rowconfigure((0, 1), weight=1)

@@ -2,6 +2,10 @@ import tkinter as tk
 from tkinter import ttk
 import cv2
 from PIL import Image, ImageTk
+import threading
+import speech_recognition as sr 
+import datetime
+import os
 
 def main():
     root = tk.Tk()
@@ -27,9 +31,9 @@ def main():
 
     position ={
         "top_left": (0,0), 
-        "top_rigth": (0,2), 
+        "top_right": (0,2), 
         "bottom_left": (2, 0), 
-        "bottom_rigth": (2, 2), 
+        "bottom_right": (2, 2), 
         "center": (1, 1)
     }
 
@@ -48,6 +52,12 @@ def main():
     
     # for the face detection
     face_classification = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+    current_region = None
+    photo_feedback = tk.StringVar(value="Say a region name to capture photo...")
+
+    feedback_label = ttk.Label(root, textvariable=photo_feedback, foreground="blue", font=("Arial", 12, "bold"))
+    feedback_label.grid(row=1, column=1)
 
     def update_frame():
         ret, frame = cap.read()
@@ -101,12 +111,57 @@ def main():
     
     # update_frame()
 
+    def listen_for_commands():
+        recognizer = sr.Recognizer()
+        mic = sr.Microphone()
+        nonlocal current_region
+
+        while True:
+            with mic as source:
+                recognizer.adjust_for_ambient_noise(source)
+                print("Listening...")
+                audio = recognizer.listen(source)
+
+            try:
+                command = recognizer.recognize_google(audio).lower()
+                print("Heard:", command)
+
+                # command = "_".join(command.split(" "))
+                # print(command)
+
+                # Match voice command with available regions
+                for region in position.keys():
+                    if region.replace("_", " ") in command:
+                        current_region = region
+                        photo_feedback.set(f"Activating {region.replace('_', ' ').title()}...")
+                        root.update()
+
+                        # Capture image
+                        ret, frame = cap.read()
+                        if ret:
+                            frame = cv2.flip(frame, 1)
+                            filename = f"{region}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                            cv2.imwrite(filename, frame)
+                            photo_feedback.set(f"Photo captured and saved as {filename}")
+                            print(f"Saved: {filename}")
+                        else:
+                            photo_feedback.set(" Failed to capture photo.")
+                        break
+                else:
+                    photo_feedback.set("Unknown command. Please say a valid region.")
+
+            except sr.UnknownValueError:
+                print("Could not understand audio.")
+            except sr.RequestError as e:
+                print("Speech Recognition error:", e)
+
     def on_close():
         cap.release()
         root.destroy()
     
     root.protocol("WM_DELETE_WINDOW", on_close)
     update_frame()
+    threading.Thread(target=listen_for_commands, daemon=True).start()
     root.mainloop()
     
     # main_frame.rowconfigure((0, 1), weight=1)

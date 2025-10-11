@@ -6,11 +6,12 @@ import threading
 import speech_recognition as sr 
 import datetime
 import os
+import time 
 
 def main():
     root = tk.Tk()
-    root.title("Five Regions")
-    root.geometry("800x500")
+    root.title("Voice-Controlled Auto-Capture")
+    root.geometry("900x600")
 
     # main_frame = ttk.Frame(root, padding=5)
     # main_frame.grid(row=0, column=0, sticky="nsew")
@@ -27,7 +28,7 @@ def main():
         root.columnconfigure(c, weight=1)
 
     frames = {}
-    lables = {}
+    labels = {}
 
     position ={
         "top_left": (0,0), 
@@ -40,10 +41,10 @@ def main():
     for name, (r, c) in position.items():
         frm = ttk.Frame(root, borderwidth=2, relief="solid")
         frm.grid(row=r, column=c, sticky="nsew", padx=2, pady=2)
-        lbl = tk.Label(frm)
+        lbl = tk.Label(frm, bg="black")
         lbl.pack(expand=True, fill="both")
         frames[name] = frm
-        lables[name] = lbl
+        labels[name] = lbl
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -51,7 +52,7 @@ def main():
         return
     
     # for the face detection
-    face_classification = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
     current_region = None
     photo_feedback = tk.StringVar(value="Say a region name to capture photo...")
@@ -59,40 +60,82 @@ def main():
     feedback_label = ttk.Label(root, textvariable=photo_feedback, foreground="blue", font=("Arial", 12, "bold"))
     feedback_label.grid(row=1, column=1)
 
+    # for centering the images
+    centered_frames = 0 
+    center_threshold = 8
+    capture_in_progress = False
+    photo_taken = False
+    centered_frames = 0
+
+    countdown_label = ttk.Label(root, text="", foreground="red", font=("Arial", 36, "bold"))
+    countdown_label.place(relx=0.5, rely=0.5, anchor="center")
+
+    def start_countdown_and_capture(frame):
+        nonlocal photo_taken, capture_in_progress
+        capture_in_progress = True
+
+        for i in [3, 2, 1, "Smile!"]:
+            countdown_label.config(text=str(i))
+            root.update()
+            time.sleep(1)
+
+        countdown_label.config(text="")
+        filename = f"{current_region}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        cv2.imwrite(filename, frame)
+        photo_feedback.set(f"Image captured and saved as: {filename}")
+        print(f"Saved: {filename}")
+
+        capture_in_progress = False
+        photo_taken = True
+
     def update_frame():
+        nonlocal centered_frames, photo_taken, capture_in_progress
+
         ret, frame = cap.read()
         if not ret:
             root.after(30, update_frame)
             return
-        
-        # mirror effect
+
         frame = cv2.flip(frame, 1)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 6, minSize=(60, 60))
 
-        # face detection 
-        gray =cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_classification.detectMultiScale(
-            gray, 
-            scaleFactor=1.1, 
-            minNeighbors=10, 
-            minSize=(30, 30)
-        )
+        frame_h, frame_w = frame.shape[:2]
+        frame_center_x, frame_center_y = frame_w // 2, frame_h // 2
+        center_threshold = 50
 
-        # drawing the bounding boxes 
-        for(x, y, w, h) in faces:
-            cv2.rectangle(frame, (x,y), (x + w, y + h), (255, 0 , 0), 3) 
+        if len(faces) > 0:
+            (x, y, w, h) = faces[0]
+            face_center_x = x + w // 2
+            face_center_y = y + h // 2
 
-        # resize for the display 
-        frame_resize = cv2.resize(frame, (320, 240))
-        frame_rgb = cv2.cvtColor(frame_resize, cv2.COLOR_BGR2RGB)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            if (abs(face_center_x - frame_center_x) < center_threshold and
+                    abs(face_center_y - frame_center_y) < center_threshold):
+                centered_frames += 1
+                photo_feedback.set("Face centered... Hold still!")
+            else:
+                centered_frames = 0
+                photo_feedback.set("Please center your face.")
+        else:
+            centered_frames = 0
+            photo_feedback.set("No face detected.")
+
+        if current_region and not photo_taken and not capture_in_progress and centered_frames > 8:
+            start_countdown_and_capture(frame)
+
+        frame_resized = cv2.resize(frame, (320, 240))
+        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame_rgb)
         imgtk = ImageTk.PhotoImage(image=img)
 
-
-        # processing in all the 5 region 
-
-        for lbl in lables.values():
-            lbl.imgtk = imgtk
-            lbl.configure(image=imgtk)
+        for name, lbl in labels.items():
+            if name == current_region:
+                lbl.imgtk = imgtk
+                lbl.configure(image=imgtk)
+            else:
+                lbl.configure(image="", bg="black")
 
         root.after(30, update_frame)
     
@@ -114,46 +157,35 @@ def main():
     def listen_for_commands():
         recognizer = sr.Recognizer()
         mic = sr.Microphone()
-        nonlocal current_region
+        nonlocal current_region, photo_taken, centered_frames
 
         while True:
             with mic as source:
                 recognizer.adjust_for_ambient_noise(source)
-                print("Listening...")
+                print("Listening for command...")
                 audio = recognizer.listen(source)
 
             try:
                 command = recognizer.recognize_google(audio).lower()
                 print("Heard:", command)
 
-                # command = "_".join(command.split(" "))
-                # print(command)
-
-                # Match voice command with available regions
                 for region in position.keys():
                     if region.replace("_", " ") in command:
                         current_region = region
-                        photo_feedback.set(f"Activating {region.replace('_', ' ').title()}...")
-                        root.update()
-
-                        # Capture image
-                        ret, frame = cap.read()
-                        if ret:
-                            frame = cv2.flip(frame, 1)
-                            filename = f"{region}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                            cv2.imwrite(filename, frame)
-                            photo_feedback.set(f"Photo captured and saved as {filename}")
-                            print(f"Saved: {filename}")
-                        else:
-                            photo_feedback.set(" Failed to capture photo.")
+                        photo_taken = False  # <--- reset capture status for new command
+                        centered_frames = 0
+                        photo_feedback.set(f"Activated {region.replace('_', ' ').title()}. Please align your face in center.")
+                        print(f"Activated {region}")
                         break
                 else:
-                    photo_feedback.set("Unknown command. Please say a valid region.")
+                    photo_feedback.set("Unknown command. Please say: top left, top right, etc.")
 
             except sr.UnknownValueError:
                 print("Could not understand audio.")
+                photo_feedback.set("Didn't catch that. Try again.")
             except sr.RequestError as e:
                 print("Speech Recognition error:", e)
+                photo_feedback.set("Speech recognition service error.")
 
     def on_close():
         cap.release()
